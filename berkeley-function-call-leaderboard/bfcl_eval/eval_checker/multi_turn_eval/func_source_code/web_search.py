@@ -9,6 +9,9 @@ import requests
 from bs4 import BeautifulSoup
 from serpapi import GoogleSearch
 
+import httpx
+import re
+
 ERROR_TEMPLATES = [
     "503 Server Error: Service Unavailable for url: {url}",
     "429 Client Error: Too Many Requests for url: {url}",
@@ -44,6 +47,135 @@ class WebSearchAPI:
         self.show_snippet = initial_config["show_snippet"]
 
     def search_engine_query(
+        self,
+        keywords: str,
+        max_results: Optional[int] = 10,
+        region: Optional[str] = "wt-wt",
+    ) -> list:
+        """Redirect to appropriate implementation. See
+        search_engine_query_original() for full docs.
+        """
+        return self.search_with_ibm_mcp(keywords, max_results)
+
+    def search_with_ibm_mcp(
+        self, keywords: str, max_results: Optional[int] = 10
+    ) -> list:
+        """
+        Drop-in replacement for BFCL web search tool, using our internal MCP search tool
+        for code agents. No region support in the internal tool.
+
+        See search_engine_query_original() for full docs.
+        """
+        if "MCP_SEARCH_TOOL_URL" not in os.environ:
+            raise ValueError(
+                "Please set the MCP_SEARCH_TOOL_URL environment variable to the URL "
+                "of the MCP web search service."
+            )
+        mcp_base_url = os.environ["MCP_SEARCH_TOOL_URL"]
+
+        with httpx.Client(verify=True) as client:
+            # Protocol intitialization ritual, see
+            # https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle
+
+            # Step 1: Initialize
+            init_response = client.post(
+                mcp_base_url,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,  # Must be different for each request
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "python-mcp-client", "version": "1.0.0"},
+                    },
+                },
+            )
+            init_response.raise_for_status()
+            # init_response_json = json.loads(init_response.content)
+
+            # Initialization returns a session id in an HTTP header, not the response
+            session_id = init_response.headers["mcp-session-id"] or None
+
+            # Step 2: Unnecessary acknowledgement of initialization message
+            init_some_more_response = client.post(
+                mcp_base_url,
+                json={
+                    "jsonrpc": "2.0",
+                    # No ID for some reason, per the protocol spec
+                    "method": "notifications/initialized",
+                },
+                headers={"mcp-session-id": session_id},
+            )
+            init_some_more_response.raise_for_status()
+
+            # Step 3: Make a tool call
+            tool_call_response = client.post(
+                mcp_base_url,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "google_pse_search",
+                        "arguments": {"query": keywords, "num_results": max_results},
+                    },
+                },
+                headers={"mcp-session-id": session_id},
+            )
+            tool_call_response.raise_for_status()
+            tool_call_response_json = tool_call_response.json()
+
+        # Parse the results of the tool call into the format of the original BFCL tool
+        # Search tool stuffs structured data into "human-readable" text, wrapped in JSON.
+        # Extract the text.
+        search_result_text = tool_call_response_json["result"]["content"][0]["text"]
+
+        # First line is search query and number of results
+        query_part, result_part = search_result_text.split("\n\n", maxsplit=1)
+
+        # Parse first line with a regex.
+        # Do this defensively because we have no idea what's on the other side of this MCP call
+        matcher = re.match(r"Found (\d+) results for: (.+)", query_part)
+        if not matcher:
+            raise ValueError(f"Couldn't parse first line '{query_part}'")
+        num_results_returned, query_returned = int(matcher.group(1)), matcher.group(2)
+        if num_results_returned > max_results:
+            raise ValueError(
+                f"Requested {max_results} results but received {num_results_returned}"
+            )
+        if keywords != query_returned:
+            raise ValueError(
+                f"Tried to run query '{keywords}' but ran query '{query_returned}' instead."
+            )
+
+        result_strs = result_part.split("\n\n")
+        # Extra \n\n at end
+        result_strs = result_strs[:-1]
+
+        results = []
+        for s in result_strs:
+            title_part, url_part, summary_part = s.split("\n   ")
+
+            # Title part contains a number.
+            matcher = re.match(r"\d+\. (.+)", title_part)
+            title = matcher.group(1)
+
+            result = {
+                "title": title,
+                # Second line is just URL with a hanging indent we've already removed
+                "href": url_part,
+            }
+            if self.show_snippet:
+                # Third line is summary with additional cruft for optional timestamp,
+                # e.g."Feb 6, 2025 ... snippet snippet snippet"
+                # Leave the additional cruft in place for now.
+                result["body"] = summary_part
+            results.append(result)
+
+        return results
+
+    def search_engine_query_original(
         self,
         keywords: str,
         max_results: Optional[int] = 10,
@@ -247,7 +379,9 @@ class WebSearchAPI:
                 "Sec-Fetch-User": "?1",
                 "Sec-Fetch-Dest": "document",
             }
-            response = requests.get(url, headers=headers, timeout=20, allow_redirects=True)
+            response = requests.get(
+                url, headers=headers, timeout=20, allow_redirects=True
+            )
             response.raise_for_status()
 
             # Note: Un-comment this when we want to simulate a random error
