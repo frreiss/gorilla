@@ -72,6 +72,9 @@ class WebSearchAPI:
                 "of the MCP web search service."
             )
         mcp_base_url = os.environ["MCP_SEARCH_TOOL_URL"]
+        
+        backoff = 20  # initial back-off in seconds
+        max_retries = 10
 
         with httpx.Client(verify=True) as client:
             # Protocol intitialization ritual, see
@@ -110,70 +113,99 @@ class WebSearchAPI:
             init_some_more_response.raise_for_status()
 
             # Step 3: Make a tool call
-            tool_call_response = client.post(
-                mcp_base_url,
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "google_pse_search",
-                        "arguments": {"query": keywords, "num_results": max_results},
+            num_retries = 0
+            while num_retries < max_retries:
+                tool_call_response = client.post(
+                    mcp_base_url,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "google_pse_search",
+                            "arguments": {"query": keywords, "num_results": max_results},
+                        },
                     },
-                },
-                headers={"mcp-session-id": session_id},
-            )
-            tool_call_response.raise_for_status()
-            tool_call_response_json = tool_call_response.json()
+                    headers={"mcp-session-id": session_id},
+                )
+                tool_call_response.raise_for_status()
+                tool_call_response_json = tool_call_response.json()
+                
+                # Search tool stuffs structured data into "human-readable" text, 
+                # wrapped in JSON.
+                # Extract the text.
+                search_result_text = tool_call_response_json["result"]["content"][0][
+                    "text"
+                ]
+                
+                # Sometimes the human-readable text contains a JSON error message.
+                # Use the same backoff code as the original implementation, but with
+                # bounded retries
+                if "google API error (status 429)" in search_result_text:
+                    wait_time = backoff + random.uniform(0, backoff)
+                    error_block = (
+                        "*" * 100
+                        + "\n❗️❗️ [WebSearchAPI] Received 429 from search API. "
+                        + f"Retrying in {wait_time:.1f} seconds…\n"
+                        + "*" * 100
+                    )
+                    print(error_block)
+                    time.sleep(wait_time)
+                    backoff = min(backoff * 2, 120)
+                    continue
+                break  # Success – no rate-limit error detected
 
-        # Parse the results of the tool call into the format of the original BFCL tool
-        # Search tool stuffs structured data into "human-readable" text, wrapped in JSON.
-        # Extract the text.
-        search_result_text = tool_call_response_json["result"]["content"][0]["text"]
+        try:
+            # Parse the results of the tool call into the format of the original BFCL 
+            # tool
 
-        # First line is search query and number of results
-        query_part, result_part = search_result_text.split("\n\n", maxsplit=1)
+            # First line is search query and number of results
+            query_part, result_part = search_result_text.split("\n\n", maxsplit=1)
 
-        # Parse first line with a regex.
-        # Do this defensively because we have no idea what's on the other side of this MCP call
-        matcher = re.match(r"Found (\d+) results for: (.+)", query_part)
-        if not matcher:
-            raise ValueError(f"Couldn't parse first line '{query_part}'")
-        num_results_returned, query_returned = int(matcher.group(1)), matcher.group(2)
-        if num_results_returned > max_results:
+            # Parse first line with a regex.
+            # Do this defensively because we have no idea what's on the other side of this MCP call
+            matcher = re.match(r"Found (\d+) results for: (.+)", query_part)
+            if not matcher:
+                raise ValueError(f"Couldn't parse first line '{query_part}'")
+            num_results_returned, query_returned = int(matcher.group(1)), matcher.group(2)
+            if num_results_returned > max_results:
+                raise ValueError(
+                    f"Requested {max_results} results but received {num_results_returned}"
+                )
+            if keywords != query_returned:
+                raise ValueError(
+                    f"Tried to run query '{keywords}' but ran query '{query_returned}' instead."
+                )
+
+            result_strs = result_part.split("\n\n")
+            # Extra \n\n at end
+            result_strs = result_strs[:-1]
+
+            results = []
+            for s in result_strs:
+                title_part, url_part, summary_part = s.split("\n   ")
+
+                # Title part contains a number.
+                matcher = re.match(r"\d+\. (.+)", title_part)
+                title = matcher.group(1)
+
+                result = {
+                    "title": title,
+                    # Second line is just URL with a hanging indent we've already removed
+                    "href": url_part,
+                }
+                if self.show_snippet:
+                    # Third line is summary with additional cruft for optional timestamp,
+                    # e.g."Feb 6, 2025 ... snippet snippet snippet"
+                    # Leave the additional cruft in place for now.
+                    result["body"] = summary_part
+                results.append(result)
+
+            return results
+        except ValueError as e:
             raise ValueError(
-                f"Requested {max_results} results but received {num_results_returned}"
-            )
-        if keywords != query_returned:
-            raise ValueError(
-                f"Tried to run query '{keywords}' but ran query '{query_returned}' instead."
-            )
-
-        result_strs = result_part.split("\n\n")
-        # Extra \n\n at end
-        result_strs = result_strs[:-1]
-
-        results = []
-        for s in result_strs:
-            title_part, url_part, summary_part = s.split("\n   ")
-
-            # Title part contains a number.
-            matcher = re.match(r"\d+\. (.+)", title_part)
-            title = matcher.group(1)
-
-            result = {
-                "title": title,
-                # Second line is just URL with a hanging indent we've already removed
-                "href": url_part,
-            }
-            if self.show_snippet:
-                # Third line is summary with additional cruft for optional timestamp,
-                # e.g."Feb 6, 2025 ... snippet snippet snippet"
-                # Leave the additional cruft in place for now.
-                result["body"] = summary_part
-            results.append(result)
-
-        return results
+                f"Error parsing search result. Result was:\n{search_result_text}"
+            ) from e
 
     def search_engine_query_original(
         self,
