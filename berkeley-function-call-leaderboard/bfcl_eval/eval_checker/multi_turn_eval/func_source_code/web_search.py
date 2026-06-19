@@ -12,6 +12,9 @@ from serpapi import GoogleSearch
 import httpx
 import re
 
+import tavily
+from .snippet import shorten_snippet
+
 ERROR_TEMPLATES = [
     "503 Server Error: Service Unavailable for url: {url}",
     "429 Client Error: Too Many Requests for url: {url}",
@@ -28,6 +31,98 @@ ERROR_TEMPLATES = [
         "Failed to establish a new connection: [Errno -2] Name or service not known'))"
     ),
 ]
+
+
+def _duckduckgo_region_code_to_tavily_country_code(region: Optional[str]) -> Optional[str]:
+    """Map region codes from the format of the SerpAPI DuckDuckGo API to Tavily's format.
+    
+    :param region: A SerpAPI region code, suitable to pass to the ``kl`` paramter of
+        the SerpAPI DuckDuckGo search API. 
+        See https://serpapi.com/duckduckgo-search-api#api-parameters-localization
+        for information about the ``kl`` parameter.
+    
+    :returns: The closest equivalent region string to pass in the ``country`` parameter
+        of the Tavily search API. 
+        See https://docs.tavily.com/documentation/api-reference/endpoint/search#body-country
+        for information about the ``country`` parameter.
+        Returns ``None`` if the ``country`` paramter should be omitted from the 
+        equivalent Tavily API call.
+    """
+    # Maps SerpAPI DuckDuckGo region codes to Tavily's proprietary country name strings.
+    # Codes with no single-country equivalent (wt-wt, xl-es, ct-ca, hk-tzh) map to None,
+    # which callers should omit from the Tavily request entirely.
+    _REGION_MAP = {
+        "xa-ar": "saudi arabia",     # Arabia
+        "xa-en": "saudi arabia",     # Arabia (en)
+        "ar-es": "argentina",
+        "au-en": "australia",
+        "at-de": "austria",
+        "be-fr": "belgium",
+        "be-nl": "belgium",
+        "br-pt": "brazil",
+        "bg-bg": "bulgaria",
+        "ca-en": "canada",
+        "ca-fr": "canada",
+        "ct-ca": None,               # Catalan — no single country equivalent
+        "cl-es": "chile",
+        "cn-zh": "china",
+        "co-es": "colombia",
+        "hr-hr": "croatia",
+        "cz-cs": "czech republic",
+        "dk-da": "denmark",
+        "ee-et": "estonia",
+        "fi-fi": "finland",
+        "fr-fr": "france",
+        "de-de": "germany",
+        "gr-el": "greece",
+        "hk-tzh": None,              # Hong Kong — not in Tavily's enumeration
+        "hu-hu": "hungary",
+        "in-en": "india",
+        "id-id": "indonesia",
+        "id-en": "indonesia",
+        "ie-en": "ireland",
+        "il-he": "israel",
+        "it-it": "italy",
+        "jp-jp": "japan",
+        "kr-kr": "south korea",
+        "lv-lv": "latvia",
+        "lt-lt": "lithuania",
+        "xl-es": None,               # Latin America — no single country equivalent
+        "my-ms": "malaysia",
+        "my-en": "malaysia",
+        "mx-es": "mexico",
+        "nl-nl": "netherlands",
+        "nz-en": "new zealand",
+        "no-no": "norway",
+        "pe-es": "peru",
+        "ph-en": "philippines",
+        "ph-tl": "philippines",
+        "pl-pl": "poland",
+        "pt-pt": "portugal",
+        "ro-ro": "romania",
+        "ru-ru": "russia",
+        "sg-en": "singapore",
+        "sk-sk": "slovakia",
+        "sl-sl": "slovenia",
+        "za-en": "south africa",
+        "es-es": "spain",
+        "se-sv": "sweden",
+        "ch-de": "switzerland",
+        "ch-fr": "switzerland",
+        "ch-it": "switzerland",
+        "tw-tzh": "taiwan",
+        "th-th": "thailand",
+        "tr-tr": "turkey",
+        "ua-uk": "ukraine",
+        "uk-en": "united kingdom",
+        "us-en": "united states",
+        "ue-es": "united states",
+        "ve-es": "venezuela",
+        "vn-vi": "vietnam",
+        "wt-wt": None,               # No region
+    }
+    return _REGION_MAP.get(region, None)
+
 
 
 class WebSearchAPI:
@@ -55,7 +150,47 @@ class WebSearchAPI:
         """Redirect to appropriate implementation. See
         search_engine_query_original() for full docs.
         """
-        return self.search_with_ibm_mcp(keywords, max_results)
+        return self.search_with_tavily(keywords, max_results, region)
+    
+    def search_with_tavily(
+        self, keywords: str, max_results: Optional[int] = 10, 
+        region: Optional[str] = None
+    ) -> list:
+        """
+        Drop-in replacement for BFCL web search tool, using a wrapper around the Tavily
+        search API that makes its results look similar to the BFCL web search tool. 
+        
+
+        See search_engine_query_original() for full docs.
+        """
+        country = _duckduckgo_region_code_to_tavily_country_code(region)
+        kwargs = {
+            "query": keywords,
+            "search_depth": "basic",
+            "max_results": max_results if max_results else 10,
+        }
+        if country is not None:
+            kwargs["country"] = country
+
+        tavily_key = os.getenv("TAVILY_KEY")
+        if tavily_key is None:
+            raise ValueError("Required environment variable TAVILY_KEY not set.")
+
+        tavily_client = tavily.TavilyClient(tavily_key)
+        response = tavily_client.search(**kwargs)
+
+        return [
+            {
+                "title": r["title"],
+                "href": r["url"],
+                # Tavily's snippets are much longer than SerpAPI's. We shorten them to 
+                # produce similar results when running the benchmark.
+                "body": shorten_snippet(
+                    keywords, r["content"], max_chars=300, hard_max_chars=500
+                ),
+            }
+            for r in response["results"]
+        ]
 
     def search_with_ibm_mcp(
         self, keywords: str, max_results: Optional[int] = 10

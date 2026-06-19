@@ -47,7 +47,8 @@ dependencies = [
     "faiss-cpu==1.11.0",
     "networkx==3.3",
     "filelock==3.20.0",
-    "brotli"
+    "brotli",
+    "tavily"  # For IBM internal use
 ]
 
 [project.scripts]
