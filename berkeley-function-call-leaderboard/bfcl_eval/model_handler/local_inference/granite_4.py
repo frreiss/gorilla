@@ -244,6 +244,9 @@ class Granite4FCHandler(OSSHandler):
 
         # Add generation prompt
         formatted_prompt += "<|start_of_role|>assistant<|end_of_role|>"
+        
+        # Force thinking
+        #formatted_prompt += "<think>"
 
         return formatted_prompt
 

@@ -172,9 +172,9 @@ class WebSearchAPI:
         if country is not None:
             kwargs["country"] = country
 
-        tavily_key = os.getenv("TAVILY_KEY")
+        tavily_key = os.getenv("TAVILY_API_KEY")
         if tavily_key is None:
-            raise ValueError("Required environment variable TAVILY_KEY not set.")
+            raise ValueError("Required environment variable TAVILY_API_KEY not set.")
 
         tavily_client = tavily.TavilyClient(tavily_key)
         response = tavily_client.search(**kwargs)

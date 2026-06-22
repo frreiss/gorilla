@@ -5,6 +5,8 @@ SerpAPI implementation. This file contains code that is used to shorten Tavily's
 result snippets to roughly the same length as SerpAPI's.
 """
 
+import threading
+
 import pysbd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -13,6 +15,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 # :meth:`segment` return spans carrying the start/end offsets of each sentence in
 # the original text, which lets us slice out a verbatim snippet.
 _SEGMENTER = pysbd.Segmenter(language="en", clean=False, char_span=True)
+_LOCK = threading.Lock()
 
 
 def shorten_snippet(query: str, document: str, max_chars: int = 200,
@@ -22,7 +25,7 @@ def shorten_snippet(query: str, document: str, max_chars: int = 200,
     There are no open source implementations of this operation that are actively
     maintained, so we roll or own. This version is intended for shortening Tavily
     result summaries so that they are about as long as the summaries of the SerpAPI
-    API that the BFCLv4 benchmark uses. Snippet quality is mediocre, which is ok 
+    API that the BFCLv4 benchmark uses. Snippet quality is mediocre, which is ok
     because it makes things more difficult for the LLM under test.
 
     The algorithm used is as follows:
@@ -52,64 +55,68 @@ def shorten_snippet(query: str, document: str, max_chars: int = 200,
     :returns: A verbatim snippet of ``document``, or the empty string if
         ``document`` or ``query`` contains no usable text.
     """
-    if not query.strip() or not document.strip():
-        return ""
-    if hard_max_chars < max_chars:
-        raise ValueError(
-            f"Hard maximum {hard_max_chars} less than soft limit {max_chars}")
+    # Something below isn't thread-safe; probably the segmenter, but it could be 
+    # something inside sklearn that runs with the GIL disabled. The overhead of this
+    # operation is so small that we can just run everything in a critical section.
+    with _LOCK:
+        if not query.strip() or not document.strip():
+            return ""
+        if hard_max_chars < max_chars:
+            raise ValueError(
+                f"Hard maximum {hard_max_chars} less than soft limit {max_chars}")
 
-    spans = _SEGMENTER.segment(document)
-    sentences = [span.sent for span in spans]
-    if not sentences:
-        return ""
+        spans = _SEGMENTER.segment(document)
+        sentences = [span.sent for span in spans]
+        if not sentences:
+            return ""
 
-    # Fit the vectorizer on the sentences plus the query so that query terms are
-    # guaranteed to be in the vocabulary. If the document and query share no
-    # vocabulary at all, every similarity is zero and we fall back to the first
-    # sentence below.
-    vectorizer = TfidfVectorizer()
-    try:
-        vectorizer.fit(sentences + [query])
-    except ValueError:
-        # Raised when there is no vocabulary (e.g. only stop words / punctuation).
-        return document[spans[0].start : spans[0].end].strip()
+        # Fit the vectorizer on the sentences plus the query so that query terms are
+        # guaranteed to be in the vocabulary. If the document and query share no
+        # vocabulary at all, every similarity is zero and we fall back to the first
+        # sentence below.
+        vectorizer = TfidfVectorizer()
+        try:
+            vectorizer.fit(sentences + [query])
+        except ValueError:
+            # Raised when there is no vocabulary (e.g. only stop words / punctuation).
+            return document[spans[0].start : spans[0].end].strip()
 
-    query_vec = vectorizer.transform([query])
+        query_vec = vectorizer.transform([query])
 
-    # For each start sentence i, grow the window as far as possible without
-    # exceeding max_chars; that greedy endpoint is the maximal window for i. A
-    # single sentence is always kept even if it alone exceeds max_chars, so every
-    # start position contributes exactly one candidate. Keeping only these
-    # maximal windows biases the result toward the target length: a shorter
-    # window is considered only when it starts at a sentence that no longer
-    # window can.
-    candidate_texts: list[str] = []
-    candidate_bounds: list[tuple[int, int]] = []  # (start_offset, end_offset)
-    for i in range(len(spans)):
-        j = i
-        while (
-            j + 1 < len(spans)
-            and spans[j + 1].end - spans[i].start <= max_chars
-        ):
-            j += 1
-        start, end = spans[i].start, spans[j].end
-        candidate_texts.append(document[start:end])
-        candidate_bounds.append((start, end))
+        # For each start sentence i, grow the window as far as possible without
+        # exceeding max_chars; that greedy endpoint is the maximal window for i. A
+        # single sentence is always kept even if it alone exceeds max_chars, so every
+        # start position contributes exactly one candidate. Keeping only these
+        # maximal windows biases the result toward the target length: a shorter
+        # window is considered only when it starts at a sentence that no longer
+        # window can.
+        candidate_texts: list[str] = []
+        candidate_bounds: list[tuple[int, int]] = []  # (start_offset, end_offset)
+        for i in range(len(spans)):
+            j = i
+            while (
+                j + 1 < len(spans)
+                and spans[j + 1].end - spans[i].start <= max_chars
+            ):
+                j += 1
+            start, end = spans[i].start, spans[j].end
+            candidate_texts.append(document[start:end])
+            candidate_bounds.append((start, end))
 
-    candidate_vecs = vectorizer.transform(candidate_texts)
-    scores = cosine_similarity(candidate_vecs, query_vec).ravel()
+        candidate_vecs = vectorizer.transform(candidate_texts)
+        scores = cosine_similarity(candidate_vecs, query_vec).ravel()
 
-    # Pick the most query-similar maximal window. On ties (e.g. all-zero
-    # similarity), argmax returns the earliest, which is the conventional
-    # fallback to the start of the document.
-    best = int(scores.argmax())
-    start, end = candidate_bounds[best]
-    
-    # Enforce hard limit and add ellipsis to indicate mid-sentence breaks
-    if end - start <= hard_max_chars:
-        return document[start:end].strip()
-    
-    # If we get here, we went over the hard limit. Split mid-sentence and add an 
-    # ellipsis.
-    ELLIPSIS = "[...]"
-    return document[start:start + hard_max_chars - len(ELLIPSIS)].strip() + ELLIPSIS
+        # Pick the most query-similar maximal window. On ties (e.g. all-zero
+        # similarity), argmax returns the earliest, which is the conventional
+        # fallback to the start of the document.
+        best = int(scores.argmax())
+        start, end = candidate_bounds[best]
+
+        # Enforce hard limit and add ellipsis to indicate mid-sentence breaks
+        if end - start <= hard_max_chars:
+            return document[start:end].strip()
+
+        # If we get here, we went over the hard limit. Split mid-sentence and add an
+        # ellipsis.
+        ELLIPSIS = "[...]"
+        return document[start:start + hard_max_chars - len(ELLIPSIS)].strip() + ELLIPSIS

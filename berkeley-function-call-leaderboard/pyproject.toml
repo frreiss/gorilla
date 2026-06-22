@@ -48,7 +48,9 @@ dependencies = [
     "networkx==3.3",
     "filelock==3.20.0",
     "brotli",
-    "tavily"  # For IBM internal use
+    "tavily",  # For IBM internal use
+    "soundfile",  # Missing dependency in main
+    "pysbd",  # Missing dependency in main
 ]
 
 [project.scripts]
