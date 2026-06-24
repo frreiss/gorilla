@@ -121,7 +121,7 @@ def _duckduckgo_region_code_to_tavily_country_code(region: Optional[str]) -> Opt
         "vn-vi": "vietnam",
         "wt-wt": None,               # No region
     }
-    return _REGION_MAP.get(region, None)
+    return _REGION_MAP.get(region)
 
 
 
@@ -150,7 +150,18 @@ class WebSearchAPI:
         """Redirect to appropriate implementation. See
         search_engine_query_original() for full docs.
         """
-        return self.search_with_tavily(keywords, max_results, region)
+        # Allow switching engines based on an environment variable.
+        # See code here for possible values and defaults.
+        search_engine_name = os.environ.get("SEARCH_ENGINE_NAME", "Tavily")
+        #print(f"Using search engine '{search_engine_name}'")
+        if search_engine_name == "Tavily":
+            return self.search_with_tavily(keywords, max_results, region)
+        if search_engine_name == "MCP":
+            return self.search_with_ibm_mcp(keywords, max_results)
+        if search_engine_name == "SerpAPI":
+            return self.search_engine_query_original(keywords, max_results, region)
+        raise ValueError(f"Unknown search engine name '{search_engine_name}' in "
+                         f"SEARCH_ENGINE_NAME environment variable.")
     
     def search_with_tavily(
         self, keywords: str, max_results: Optional[int] = 10, 
