@@ -1209,6 +1209,19 @@ api_inference_model_map = {
         is_fc_model=True,
         underscore_to_dot=True,
     ),
+    # Granite 4.2 8b or derivative model hosted on vLLM
+    "granite-4.2-8b-FC": ModelConfig(
+        model_name="ibm-research/granite-4.2-8b-prerelease-r260622a",
+        display_name="granite-4.2-8b (FC)",
+        url="",
+        org="IBM",
+        license="apache-2.0",
+        model_handler=OpenAIResponsesHandler,
+        input_price=0.0,
+        output_price=0.0,
+        is_fc_model=True,
+        underscore_to_dot=True,
+    ),
 }
 
 # Inference through local hosting
