@@ -20,6 +20,7 @@ from bfcl_eval.model_handler.api_inference.nemotron import NemotronHandler
 from bfcl_eval.model_handler.api_inference.nova import NovaHandler
 from bfcl_eval.model_handler.api_inference.novita import NovitaHandler
 from bfcl_eval.model_handler.api_inference.nvidia import NvidiaHandler
+from bfcl_eval.model_handler.api_inference.granite import GraniteCompletionsHandler
 from bfcl_eval.model_handler.api_inference.openai_completion import (
     OpenAICompletionsHandler,
 )
@@ -1216,7 +1217,7 @@ api_inference_model_map = {
         url="",
         org="IBM",
         license="apache-2.0",
-        model_handler=OpenAIResponsesHandler,
+        model_handler=GraniteCompletionsHandler,
         input_price=0.0,
         output_price=0.0,
         is_fc_model=True,
