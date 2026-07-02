@@ -1,9 +1,12 @@
 from typing import Any
+import time
+
 
 from bfcl_eval.model_handler.api_inference.openai_completion import (
     OpenAICompletionsHandler,
 )
 from bfcl_eval.model_handler import utils
+from openai import RateLimitError, APITimeoutError
 
 
 class VLLMCompletionsHandler(OpenAICompletionsHandler):
@@ -13,6 +16,19 @@ class VLLMCompletionsHandler(OpenAICompletionsHandler):
     The vLLM implementation diverges somewhat from the commercial OpenAI endpoint
     when dealing with reasoning models and tool calls.
     """
+    
+    @utils.retry_with_backoff(error_type=[RateLimitError, APITimeoutError])
+    def generate_with_backoff(self, **kwargs):
+        """vLLM-specific inner loop for generation.
+        
+        This code is identical to the superclass method, but with additional exceptions
+        that trigger retry.
+        """
+        start_time = time.time()
+        api_response = self.client.chat.completions.create(**kwargs)
+        end_time = time.time()
+
+        return api_response, end_time - start_time
     
     
     def _parse_query_response_FC(self, api_response: Any) -> dict:
