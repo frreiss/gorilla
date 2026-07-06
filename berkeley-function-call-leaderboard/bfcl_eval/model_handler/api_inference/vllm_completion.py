@@ -6,8 +6,9 @@ from bfcl_eval.model_handler.api_inference.openai_completion import (
     OpenAICompletionsHandler,
 )
 from bfcl_eval.model_handler import utils
-from openai import RateLimitError, APITimeoutError
-
+from openai import RateLimitError, APITimeoutError, BadRequestError
+from openai.types.chat import ChatCompletion, ChatCompletionMessage
+from openai.types.chat.chat_completion import Choice
 
 class VLLMCompletionsHandler(OpenAICompletionsHandler):
     """
@@ -21,8 +22,8 @@ class VLLMCompletionsHandler(OpenAICompletionsHandler):
     def generate_with_backoff(self, **kwargs):
         """vLLM-specific inner loop for generation.
         
-        This code is identical to the superclass method, but with additional exceptions
-        that trigger retry.
+        This code is identical to the superclass method, with the following changes:
+        * additional exceptions that trigger retry.
         """
         start_time = time.time()
         api_response = self.client.chat.completions.create(**kwargs)
@@ -40,7 +41,8 @@ class VLLMCompletionsHandler(OpenAICompletionsHandler):
         """
         if len(api_response.choices) != 1:
             raise ValueError(f"Response has {len(api_response.choices)}; expected 1")
-        message = api_response.choices[0].message
+        choice = api_response.choices[0]
+        message = choice.message
         
         if message.tool_calls:
             model_responses = [
@@ -54,9 +56,13 @@ class VLLMCompletionsHandler(OpenAICompletionsHandler):
             # Not a tool call; look for a message to the user
             if isinstance(message.content, str):
                 model_responses = message.content
+            elif choice.finish_reason == "length":
+                # Ran out of context during chain of thought
+                model_responses = []
             else:
                 raise TypeError(f"Don't know how to handle content of type "
-                                f"{type(message.content)}")
+                                f"{type(message.content)}.\n"
+                                f"Response was: {api_response}")
             tool_call_ids = []
         
         # Check for reasoning content
