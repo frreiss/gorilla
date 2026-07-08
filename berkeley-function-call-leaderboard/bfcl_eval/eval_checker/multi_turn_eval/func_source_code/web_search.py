@@ -157,6 +157,7 @@ class WebSearchAPI:
         if search_engine_name == "Tavily":
             return self.search_with_tavily(keywords, max_results, region)
         if search_engine_name == "MCP":
+            #print("Using MCP search")
             return self.search_with_ibm_mcp(keywords, max_results)
         if search_engine_name == "SerpAPI":
             return self.search_engine_query_original(keywords, max_results, region)
@@ -184,11 +185,29 @@ class WebSearchAPI:
             kwargs["country"] = country
 
         tavily_key = os.getenv("TAVILY_API_KEY")
+        #print(f"Tavily API key: {tavily_key}")
         if tavily_key is None:
             raise ValueError("Required environment variable TAVILY_API_KEY not set.")
 
         tavily_client = tavily.TavilyClient(tavily_key)
-        response = tavily_client.search(**kwargs)
+
+        # Replicate exponential backoff behavior of original tool
+        backoff = 2  # initial back-off in seconds
+        while True:
+            try:
+                response = tavily_client.search(**kwargs)
+            except tavily.exceptions.UsageLimitExceededError:
+                wait_time = backoff + random.uniform(0, backoff)
+                error_block = (
+                    "*" * 100
+                    + f"\n❗️❗️ [WebSearchAPI] Received 429 from Tavily search. "
+                    f"Retrying in {wait_time:.1f} seconds…\n"
+                    + "*" * 100
+                )
+                print(error_block)
+                time.sleep(wait_time)
+                backoff = min(backoff * 2, 120)  # cap the back-off
+                continue
 
         return [
             {

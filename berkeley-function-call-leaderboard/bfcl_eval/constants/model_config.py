@@ -1248,6 +1248,32 @@ api_inference_model_map = {
         is_fc_model=True,
         underscore_to_dot=True,
     ),
+    # IBM's config for GPT-OSS via vLLM, not part of official repo
+    "gpt-oss-20b-FC": ModelConfig(
+        model_name="openai/gpt-oss-20b",
+        display_name="gpt-oss-20b (FC)",
+        url="",
+        org="OpenAI",
+        license="apache-2.0",
+        model_handler=VLLMCompletionsHandler,
+        input_price=0.0,
+        output_price=0.0,
+        is_fc_model=True,
+        underscore_to_dot=True,
+    ),
+    # IBM's config for Nemotron via vLLM, not part of official repo
+    "NVIDIA-Nemotron-3-Nano-30B-A3B-BF16-FC": ModelConfig(
+        model_name="nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16",
+        display_name="NVIDIA-Nemotron-3-Nano-30B-A3B-BF16 (FC)",
+        url="",
+        org="NVIDIA",
+        license="apache-2.0",
+        model_handler=VLLMCompletionsHandler,
+        input_price=0.0,
+        output_price=0.0,
+        is_fc_model=True,
+        underscore_to_dot=True,
+    ),
 }
 
 # Inference through local hosting

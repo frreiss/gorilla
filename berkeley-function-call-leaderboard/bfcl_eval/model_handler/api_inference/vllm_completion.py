@@ -6,9 +6,10 @@ from bfcl_eval.model_handler.api_inference.openai_completion import (
     OpenAICompletionsHandler,
 )
 from bfcl_eval.model_handler import utils
-from openai import RateLimitError, APITimeoutError, BadRequestError
-from openai.types.chat import ChatCompletion, ChatCompletionMessage
-from openai.types.chat.chat_completion import Choice
+from openai import RateLimitError, APITimeoutError
+
+# Limit completion tokens to emulate commercial API behvarior
+_DEFAULT_MAX_COMPLETION_TOKENS = 4096
 
 class VLLMCompletionsHandler(OpenAICompletionsHandler):
     """
@@ -26,6 +27,8 @@ class VLLMCompletionsHandler(OpenAICompletionsHandler):
         * additional exceptions that trigger retry.
         """
         start_time = time.time()
+        if "max_completion_tokens" not in kwargs:
+            kwargs["max_completion_tokens"] = _DEFAULT_MAX_COMPLETION_TOKENS
         api_response = self.client.chat.completions.create(**kwargs)
         end_time = time.time()
 
