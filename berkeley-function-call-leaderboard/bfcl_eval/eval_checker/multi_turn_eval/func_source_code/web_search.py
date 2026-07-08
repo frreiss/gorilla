@@ -196,6 +196,7 @@ class WebSearchAPI:
         while True:
             try:
                 response = tavily_client.search(**kwargs)
+                break
             except tavily.exceptions.UsageLimitExceededError:
                 wait_time = backoff + random.uniform(0, backoff)
                 error_block = (
