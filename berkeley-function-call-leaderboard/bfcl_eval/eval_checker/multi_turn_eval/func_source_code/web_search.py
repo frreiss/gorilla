@@ -193,7 +193,9 @@ class WebSearchAPI:
 
         # Replicate exponential backoff behavior of original tool
         backoff = 2  # initial back-off in seconds
-        while True:
+        num_attempts_remaining = 10  # Just in case
+        while num_attempts_remaining > 0:
+            num_attempts_remaining -= 1
             try:
                 response = tavily_client.search(**kwargs)
                 break
@@ -209,6 +211,9 @@ class WebSearchAPI:
                 time.sleep(wait_time)
                 backoff = min(backoff * 2, 120)  # cap the back-off
                 continue
+            
+        if num_attempts_remaining == 0:
+            raise ValueError("Failed to reach Tavily after 10 attempts.")
 
         return [
             {
