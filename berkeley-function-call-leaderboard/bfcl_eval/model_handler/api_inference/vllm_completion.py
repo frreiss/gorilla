@@ -1,4 +1,6 @@
 from typing import Any
+import json
+import os
 import time
 
 
@@ -14,21 +16,33 @@ _DEFAULT_MAX_COMPLETION_TOKENS = 4096
 class VLLMCompletionsHandler(OpenAICompletionsHandler):
     """
     Generic handler for vLLM's OpenAI-compatible chat completions endpoint.
-    
+
     The vLLM implementation diverges somewhat from the commercial OpenAI endpoint
     when dealing with reasoning models and tool calls.
     """
-    
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        
+        # Optionally read values for the `extra_body` parameter from an environment
+        # variable.
+        self.extra_body = None
+        if extra_body_env := os.getenv("OPENAI_EXTRA_BODY"):
+            self.extra_body = json.loads(extra_body_env)
+
     @utils.retry_with_backoff(error_type=[RateLimitError, APITimeoutError])
     def generate_with_backoff(self, **kwargs):
         """vLLM-specific inner loop for generation.
-        
+
         This code is identical to the superclass method, with the following changes:
         * additional exceptions that trigger retry.
         """
         start_time = time.time()
         if "max_completion_tokens" not in kwargs:
             kwargs["max_completion_tokens"] = _DEFAULT_MAX_COMPLETION_TOKENS
+        if self.extra_body:
+            print(f"Setting extra_body={self.extra_body}")
+            kwargs["extra_body"] = self.extra_body
         api_response = self.client.chat.completions.create(**kwargs)
         end_time = time.time()
 
@@ -69,12 +83,12 @@ class VLLMCompletionsHandler(OpenAICompletionsHandler):
             tool_call_ids = []
         
         # Check for reasoning content
-        # if hasattr(message, "reasoning_content"):
-        #     reasoning = message.reasoning_content
-        # elif hasattr(message, "reasoning"):
-        #     reasoning = message.reasoning
-        # else:
-        #     reasoning = None
+        if hasattr(message, "reasoning_content"):
+            reasoning = message.reasoning_content
+        elif hasattr(message, "reasoning"):
+            reasoning = message.reasoning
+        else:
+            reasoning = None
             
         #print(f"Input:\n{api_response}")
 
@@ -84,10 +98,9 @@ class VLLMCompletionsHandler(OpenAICompletionsHandler):
             "tool_call_ids": tool_call_ids,
             "input_token": api_response.usage.prompt_tokens,
             "output_token": api_response.usage.completion_tokens,
-            # Don't add redundant reasoning content that's already in the chat history
-            #"reasoning_content": reasoning
+            "reasoning_content": reasoning
         }
-        #print(f"Output:\n{result}")
+        print(f"Output:\n{result}")
         return result
     
     def decode_execute(self, result, has_tool_call_tag):

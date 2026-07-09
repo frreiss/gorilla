@@ -1261,6 +1261,18 @@ api_inference_model_map = {
         is_fc_model=True,
         underscore_to_dot=True,
     ),
+    "gpt-oss-120b-FC": ModelConfig(
+        model_name="openai/gpt-oss-120b",
+        display_name="gpt-oss-120b (FC)",
+        url="",
+        org="OpenAI",
+        license="apache-2.0",
+        model_handler=VLLMCompletionsHandler,
+        input_price=0.0,
+        output_price=0.0,
+        is_fc_model=True,
+        underscore_to_dot=True,
+    ),
     # IBM's config for Nemotron via vLLM, not part of official repo
     "NVIDIA-Nemotron-3-Nano-30B-A3B-BF16-FC": ModelConfig(
         model_name="nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16",

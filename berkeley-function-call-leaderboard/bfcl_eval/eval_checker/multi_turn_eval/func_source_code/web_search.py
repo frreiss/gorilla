@@ -157,7 +157,7 @@ class WebSearchAPI:
         if search_engine_name == "Tavily":
             return self.search_with_tavily(keywords, max_results, region)
         if search_engine_name == "MCP":
-            #print("Using MCP search")
+            print("Using MCP search")
             return self.search_with_ibm_mcp(keywords, max_results)
         if search_engine_name == "SerpAPI":
             return self.search_engine_query_original(keywords, max_results, region)
