@@ -414,6 +414,12 @@ def load_dataset_entry(
         # Format sensitivity categories
         all_entries = load_format_sensitivity_test_cases()
 
+    elif test_category == "web_search_synthetic":
+        # Synthetic web search category uses its own data file
+        file_name = f"{VERSION_PREFIX}_web_search_synthetic.json"
+        all_entries = load_file(PROMPT_PATH / file_name)
+        all_entries = process_web_search_test_case(all_entries, test_category)
+
     elif is_web_search(test_category):
         # Web search categories
         file_name = f"{VERSION_PREFIX}_web_search.json"
@@ -452,6 +458,9 @@ def load_ground_truth_entry(test_category: str) -> list[dict]:
 
     elif is_memory(test_category):
         return load_file(POSSIBLE_ANSWER_PATH / f"{VERSION_PREFIX}_memory.json")
+
+    elif test_category == "web_search_synthetic":
+        return load_file(POSSIBLE_ANSWER_PATH / f"{VERSION_PREFIX}_web_search_synthetic.json")
 
     elif is_web_search(test_category):
         return load_file(POSSIBLE_ANSWER_PATH / f"{VERSION_PREFIX}_web_search.json")

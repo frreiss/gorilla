@@ -41,6 +41,7 @@ MULTI_TURN_CATEGORY = [
 WEB_SEARCH_CATEGORY = [
     "web_search_base",
     "web_search_no_snippet",
+    "web_search_synthetic",
 ]
 
 MEMORY_CATEGORY = [f"memory_{backend}" for backend in ALL_AVAILABLE_MEMORY_BACKENDS]
