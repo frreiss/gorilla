@@ -436,10 +436,12 @@ def generate_leaderboard_csv(leaderboard_table, output_path):
         # Agentic Score
         web_search_base = get_category_score(value, "web_search_base")
         web_search_no_snippet = get_category_score(value, "web_search_no_snippet")
+        web_search_synthetic = get_category_score(value, "web_search_synthetic")
         summary_web_search = calculate_unweighted_accuracy(
             [
                 web_search_base,
                 web_search_no_snippet,
+                web_search_synthetic,
             ]
         )
         memory_kv = get_category_score(value, "memory_kv")
@@ -468,6 +470,7 @@ def generate_leaderboard_csv(leaderboard_table, output_path):
                 summary_web_search["display_accuracy"],
                 web_search_base["display_accuracy"],
                 web_search_no_snippet["display_accuracy"],
+                web_search_synthetic["display_accuracy"],
                 summary_memory["display_accuracy"],
                 memory_kv["display_accuracy"],
                 memory_vector["display_accuracy"],
@@ -546,6 +549,7 @@ def generate_leaderboard_csv(leaderboard_table, output_path):
                 summary_web_search["display_accuracy"],
                 web_search_base["display_accuracy"],
                 web_search_no_snippet["display_accuracy"],
+                web_search_synthetic["display_accuracy"],
                 summary_memory["display_accuracy"],
                 memory_kv["display_accuracy"],
                 memory_vector["display_accuracy"],
